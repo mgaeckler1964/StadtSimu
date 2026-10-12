@@ -1,0 +1,54 @@
+#include <windows.h>
+
+#include "stadtSimu_rc.h"
+
+IDI_STADT_SIMU			ICON	"stadtSimu.ico"
+
+IDI_SMALL_LIVING		ICON	"smallLiving.ico"
+IDI_LARGE_LIVING		ICON	"largeLiving.ico"
+
+IDI_SMALL_COMMERCIAL	ICON	"smallCommercial.ico"
+IDI_LARGE_COMMERCIAL	ICON	"largeCommercial.ico"
+
+IDI_SMALL_INDUSTRY		ICON	"smallIndustry.ico"
+IDI_LARGE_INDUSTRY		ICON	"largeIndustry.ico"
+
+IDI_POLICE				ICON	"Police.ico"
+IDI_FIRE				ICON	"Fire.ico"
+IDI_HOSPITAL			ICON	"Hospital.ico"
+IDI_TOWN_HALL			ICON	"TownHall.ico"
+IDI_SMALL_SCHOOL		ICON	"smallSchool.ico"
+IDI_LARGE_SCHOOL		ICON	"largeSchool.ico"
+IDI_VOLTAIC				ICON	"voltaic.ico"
+IDI_WATER_PLANT			ICON	"waterPlant.ico"
+
+IDI_RAIL_CROSSING		ICON	"railCrossing.ico"
+
+1 VERSIONINFO
+FILEVERSION 1, 0, 0, 0
+PRODUCTVERSION 1, 0, 0, 0
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+	BLOCK "040704E4"              // Matches VarFileInfo Translation hex value.
+	BEGIN
+	  VALUE "CompanyName", "Martin Gäckler\000"
+	  VALUE "FileDescription", "Stadtsimulation für Windows\000"
+	  VALUE "FileVersion", "1.0\000"
+	  VALUE "InternalName", "winapp\000"
+	  VALUE "LegalCopyright", "Copyright 8 2026. All Rights Reserved.\000"
+	  VALUE "LegalTrademarks", "Windows(TM) is a trademark of Microsoft Corporation\000"
+	  VALUE "OriginalFilename", "stadtSimu.exe\000"
+	  VALUE "ProductName", "StadtSimu\000"
+	  VALUE "ProductVersion", "1.0\000"
+	END
+  END
+
+  BLOCK "VarFileInfo"
+  BEGIN
+//	VALUE "Translation", 0x0409, 0x04e4    // U.S. English(0x0409) & Windows Multilingual(0x04e4) 1252
+	VALUE "Translation", 0x0407, 0x04e4    // Deutsch(0x0407) & Windows Multilingual(0x04e4) 1252
+  END
+END
+
