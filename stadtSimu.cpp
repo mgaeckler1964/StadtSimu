@@ -37,6 +37,7 @@
 // ----- includes ------------------------------------------------------ //
 // --------------------------------------------------------------------- //
 
+#include <gak/math.h>
 #include <gak/array.h>
 #include <gak/queue.h>
 #include <gak/iostream.h>
@@ -90,6 +91,9 @@ const size_t	MINIMUM_JOB_COUNT = 100;			// the minimum number of jobs, if there 
 const double	POPULATION_CHANGE_BY_BEDS = 0.1;	// moving in factor by free beds
 const double	POPULATION_CHANGE_BY_JOBS = 0.1;	// moving in factor by free jobs
 const int		SLEEP_TRIGGER = 20;					// The first Beds less than this values are occupied earlier
+
+const int		WATER_RANDOM = 3;	// the probability for Water-dots
+const int		TREE_RANDOM = 3;	// ... for trees
 
 // decision for new working contracts
 const double	JOB_CHANGE = 0.05;
@@ -229,18 +233,21 @@ struct CityArea
 		pbtSMALL_INDUSTRY, pbtLARGE_INDUSTRY
 
 	} buildingType;
-	bool	dependent, master;
-	int		width, height;
+	static const int dependent = 0;
+	static const int master = 1;
+	static const int tree = 2;
+	gak::Bitfield	bits;
+	gak::int32	width, height;
 
 	void makeMaster( int width=2, int height=2 )
 	{
-		dependent = master = true;
+		bits.set( dependent ).set( master );
 		this->width = width;
 		this->height = height;
 	}
 	void makeDependent()
 	{
-		dependent = true;
+		bits.set( dependent );
 	}
 	void fromBinaryStream( std::istream &stream );
 	void toBinaryStream( std::ostream &stream ) const;
@@ -274,10 +281,10 @@ namespace gak
 
 class CityWindow : public OverlappedWindow
 {
-	typedef long											AreaID;
-	typedef gak::PODarray<AreaID>							AreaIDs;
-	typedef gak::PairMap<CityArea::AreaType, AreaIDs>		AreaMapList;
-	typedef gak::PairMap<CityArea::BuildingType, size_t>	BuildingCountMap;
+	typedef long												AreaID;
+	typedef gak::PODarray<AreaID>								AreaIDs;
+	typedef gak::PairMap<CityArea::AreaType, AreaIDs>			AreaMapList;
+	typedef gak::PairMap<CityArea::BuildingType, gak::uint64>	BuildingCountMap;
 	
 	struct TheCity
 	{
@@ -286,25 +293,23 @@ class CityWindow : public OverlappedWindow
 		BuildingCountMap		buildingCount;
 
 		gak::int64				money;
-		size_t					population,
+		gak::uint64				population,
 								beds,
 								jobs,
 								occupiedJobs;
-		long					powerValue, 
+		gak::int32				powerValue, 
 								waterValue;
-
-
 
 		/*
 			beds and population
 		*/
-		int getFreeBeds() const
+		long getBedGap() const
 		{
 			return long(beds - population);
 		}
 		double getFreeBedFactor() const
 		{
-			return beds ? double(getFreeBeds())/double(beds) : 0;
+			return beds ? double(getBedGap())/double(beds) : 0;
 		}
 		long getHomeLess() const
 		{
@@ -321,6 +326,10 @@ class CityWindow : public OverlappedWindow
 		double getFreeJobFactor() const
 		{
 			return jobs ? double(getFreeJobs())/double(jobs) : 0;
+		}
+		double getOcupiedJobFactor() const
+		{
+			return jobs ? double(occupiedJobs)/double(jobs) : 0;
 		}
 		size_t getWorkers() const
 		{
@@ -658,8 +667,7 @@ void CityArea::fromBinaryStream( std::istream &stream )
 	areaType = AreaType(tmpType);
 	gak::fromBinaryStream( stream, &tmpType );
 	buildingType = BuildingType(tmpType);
-	gak::fromBinaryStream( stream, &dependent );
-	gak::fromBinaryStream( stream, &master );
+	gak::fromBinaryStream( stream, &bits );
 	gak::fromBinaryStream( stream, &width );
 	gak::fromBinaryStream( stream, &height );
 }
@@ -670,8 +678,7 @@ void CityArea::toBinaryStream( std::ostream &stream ) const
 	gak::toBinaryStream( stream, tmpType );
 	tmpType = buildingType;
 	gak::toBinaryStream( stream, tmpType );
-	gak::toBinaryStream( stream, dependent );
-	gak::toBinaryStream( stream, master );
+	gak::toBinaryStream( stream, bits );
 	gak::toBinaryStream( stream, width );
 	gak::toBinaryStream( stream, height );
 }
@@ -757,8 +764,11 @@ double CityWindow::getSuccessFactor() const
 	FOR_EACH( i, typesToCheck, {
 		const CityArea::BuildingType buildingType = typesToCheck[i];
 		const BuildingInfo &info = s_buildingInfos[buildingType];
-		const size_t count = m_theCity.buildingCount[buildingType];
-		successFactor.add( gak::math::min(double(count * info.supportCount) / population,1.0) );
+		if( m_theCity.buildingCount.hasElement(buildingType) )
+		{
+			const size_t count = m_theCity.buildingCount[buildingType];
+			successFactor.add( gak::math::min(double(count * info.supportCount) / population,1.0) );
+		}
 	});
 
 	const std::size_t	greenCount = m_theCity.getAreaCount(CityArea::atGREEN);
@@ -873,7 +883,7 @@ void CityWindow::processArea(AreaID index)
 			if( constructHouse( master, masterIndex, newType ) )
 				createLargeArea( master, masterIndex );
 		}
-		else if( !area.dependent )
+		else if( !area.bits.test(CityArea::dependent) )
 			constructHouse( &area, index, newType );
 		updateStatus();
 	}
@@ -896,9 +906,13 @@ gak::int64 CityWindow::getCost()
 	};
 
 	gak::int64	cost = MAYOR_INCOME;
-
+	const double ocupiedJobsFactor = m_theCity.getOcupiedJobFactor();
 	FOR_EACH( i, s_publicBuildingCost, {
-		cost += m_theCity.buildingCount[ s_publicBuildingCost[i].type ] * s_publicBuildingCost[i].cost;
+		const CityArea::BuildingType	type = s_publicBuildingCost[i].type;
+		const gak::uint64				count = m_theCity.buildingCount[type];
+
+		cost += count * s_publicBuildingCost[i].cost;
+		cost += gak::math::round<gak::int64>(s_buildingInfos[type].jobs * count * WORKER_TAX * 2 * ocupiedJobsFactor);
 	});
 
 	cost += m_theCity.areaMapList[CityArea::atSTREET].size() * STREET_COST;
@@ -911,19 +925,24 @@ gak::int64 CityWindow::getCost()
 
 void CityWindow::nextCityStep()
 {
-	const int freeBeds = m_theCity.getFreeBeds();
-	const int bedsPopulationChange = freeBeds < SLEEP_TRIGGER ? freeBeds : (SLEEP_TRIGGER + gak::math::round<int>((freeBeds-SLEEP_TRIGGER) * POPULATION_CHANGE_BY_BEDS));
+	using gak::math::DoubleScale;
+	static const DoubleScale	s_scale( DoubleScale::Pair(0,1), DoubleScale::Pair(-1,1) );
+	const long bedGap = m_theCity.getBedGap();
+	const long absBedGap = gak::math::abs(bedGap);
+	const long absBedsPopulationChange = absBedGap < SLEEP_TRIGGER ? absBedGap : (SLEEP_TRIGGER + gak::math::round<int>((absBedGap-SLEEP_TRIGGER) * POPULATION_CHANGE_BY_BEDS));
+	const long bedsPopulationChange = bedGap >= 0 ? absBedsPopulationChange : -absBedsPopulationChange;
 
-	const int freeJobs = m_theCity.getFreeJobs();
-	const int jobPopulationChange = gak::math::round<int>(freeJobs * POPULATION_CHANGE_BY_JOBS);
+	const long freeJobs = m_theCity.getFreeJobs();
+	const long unemployed = m_theCity.getUnemployed();
+	const long jobPopulationChange = gak::math::round<long>(double(freeJobs-unemployed) * POPULATION_CHANGE_BY_JOBS);
 
-	const double success = getSuccessFactor();
-	const int popuLationChange=gak::math::round<int>(double((bedsPopulationChange + jobPopulationChange)/2)*success);
+	const double success = s_scale(getSuccessFactor());
+
+	const long popuLationChange=gak::math::round<long>(double((bedsPopulationChange + jobPopulationChange)/2)*success);
 
 	m_theCity.population += popuLationChange;
 
-	int unemployed = m_theCity.getUnemployed();
-	int match = gak::math::min( freeJobs, unemployed );
+	long match = gak::math::min( freeJobs, unemployed );
 	if( match > 0 )
 	{
 		match = gak::math::max( gak::math::round<int>(match * JOB_CHANGE), 1 );
@@ -962,7 +981,7 @@ gak::int64 CityWindow::constructHouse2( CityArea *area, AreaID index, CityArea::
 
 	AreaID transport=findGoodTransport( index );
 
-	if( transport>= 0 && area->master )
+	if( transport>= 0 && area->bits.test(CityArea::master) )
 	{
 		AreaID right = rightID( index );
 		assert( right > 0 );
@@ -1196,14 +1215,15 @@ void CityWindow::drawArea( Device &dev, AreaID index, int x, int y )
 	assertValidID(index);
 
 	const CityArea &area = m_theCity.areas[index];
-	if( area.dependent && !area.master )
+	if( area.bits.test(CityArea::dependent) && !area.bits.test(CityArea::master) )
 		return;
 
 	CityArea::AreaType type = area.areaType;
 	Icon		*drawIcon = nullptr;
 	COLORREF	color;
 	COLORREF	shapeColor;
-	bool		hasShape = false;
+	COLORREF	dotColor;
+	bool		hasShape = false, hasDot = false;
 
 	drawIcon = s_buildingInfos.hasElement(area.buildingType) ? s_buildingInfos[area.buildingType].icon : nullptr; // area.icon;
 	switch( type )
@@ -1211,34 +1231,15 @@ void CityWindow::drawArea( Device &dev, AreaID index, int x, int y )
 	case CityArea::atCOMMERCIAL:
 		color = colors::AQUA_MARINE;
 		break;
-	case CityArea::atGREEN:
-		color = colors::GREEN;
-		break;
 	case CityArea::atINDUSTRY:
 		color = RGB(64,64,64);
 		break;
 	case CityArea::atPUBLIC_BUILDING:
 		color = RGB(198,198,198);
 		if( area.buildingType == CityArea::btSCHOOL )
-			drawIcon = area.master ? &s_schoolL : &s_schoolS;
+			drawIcon = area.bits.test(CityArea::master) ? &s_schoolL : &s_schoolS;
 		else
-			drawIcon = s_buildingInfos.hasElement(area.buildingType) ? s_buildingInfos[area.buildingType].icon : nullptr; // area.icon;
-/*
-		if( area.buildingType == CityArea::btFIRE )
-			drawIcon = &s_fire;
-		else if( area.buildingType == CityArea::btHOSPITAL )
-			drawIcon = &s_hospital;
-		else if( area.buildingType == CityArea::btTOWN_HALL )
-			drawIcon = &s_townHall;
-		else if( area.buildingType == CityArea::btSCHOOL )
-			drawIcon = area.master ? &s_schoolL : &s_schoolS;
-		else if( area.buildingType == CityArea::btPOLICE )
-			drawIcon = &s_police;
-		else if( area.buildingType == CityArea::btENERGY )
-			drawIcon = &s_voltaic;
-		else if( area.buildingType == CityArea::btWATER_PLANT )
-			drawIcon = &s_waterPlant;
-*/
+			drawIcon = s_buildingInfos.hasElement(area.buildingType) ? s_buildingInfos[area.buildingType].icon : nullptr;
 		break;
 	case CityArea::atLIVING:
 		color = colors::BEIGE;
@@ -1257,9 +1258,17 @@ void CityWindow::drawArea( Device &dev, AreaID index, int x, int y )
 		hasShape = true;
 		break;
 	case CityArea::atWATER:
-		color = colors::GREEN;
 		shapeColor = colors::BLUE;
 		hasShape = true;
+		dotColor = colors::WHITE;
+		hasDot = true;
+		color = colors::LIME_GREEN;
+		break;
+	case CityArea::atGREEN:
+		dotColor = colors::GREEN;
+		color = colors::LIME_GREEN;
+		break;
+
 		break;
 	default:
 		color = colors::WHITE;
@@ -1273,13 +1282,26 @@ void CityWindow::drawArea( Device &dev, AreaID index, int x, int y )
 		dev.getBrush().create( shapeColor );
 		drawShape( dev, x, y, calcBorder( index ) );
 	}
-	if( drawIcon )
+	else if( drawIcon )
 	{
 		Size si = drawIcon->getSize();
-		if( area.master )
+		if( area.bits.test(CityArea::master) )
 			dev.drawIcon( x, y, AREA_PIXEL_SIZE*area.width, AREA_PIXEL_SIZE*area.height, *drawIcon );
-		else if( !area.dependent )
+		else if( !area.bits.test(CityArea::dependent) )
 			dev.drawIcon( x, y, AREA_PIXEL_SIZE, AREA_PIXEL_SIZE, *drawIcon );
+	}
+	if( area.bits.test( CityArea::tree) )
+		hasDot = true;
+	else if( hasDot )
+		hasDot = !randomNumber(WATER_RANDOM);
+	if(hasDot)
+	{
+		// paint a dot
+		dev.getBrush().create( dotColor );
+		const int offset = AREA_PIXEL_SIZE/2-2;
+		const int treeX = x + offset;
+		const int treeY = y + offset;
+		dev.ellipse( treeX, treeY, treeX+5, treeY+5 );
 	}
 }
 
@@ -1307,9 +1329,9 @@ void CityWindow::createLargeArea( CityArea *area, AreaID index )
 	AreaID		bottomRight = rightID( bottom );
 	CityArea	*bottomRightArea = bottomRight >= 0 ? m_theCity.areas + size_t(bottomRight) : nullptr;
 
-	rightArea->dependent = true;
-	bottomArea->dependent = true;
-	bottomRightArea->dependent = true;
+	rightArea->bits.set(CityArea::dependent);
+	bottomArea->bits.set(CityArea::dependent);
+	bottomRightArea->bits.set(CityArea::dependent);
 }
 
 CityArea *CityWindow::checkLargeArea( AreaID *io_index ) const
@@ -1332,21 +1354,21 @@ CityArea *CityWindow::checkLargeArea( AreaID *io_index ) const
 	const CityArea	*bottomArea = bottom >= 0 ? m_theCity.areas + size_t(bottom) : nullptr;
 
 	// check the top neighbors
-	if( topArea && compatibleBuilding(topArea, &area) && !topArea->dependent )
+	if( topArea && compatibleBuilding(topArea, &area) && !topArea->bits.test(CityArea::dependent) )
 	{
 		AreaID topLeft = leftID( top );
 		const CityArea	*topLeftArea = topLeft >= 0 ? m_theCity.areas + size_t(topLeft) : nullptr;
 		AreaID topRight = rightID( top );
 		const CityArea	*topRightArea = topRight >= 0 ? m_theCity.areas + size_t(topRight) : nullptr;
 
-		if( topLeftArea && compatibleBuilding(topLeftArea, &area) && !topLeftArea->dependent &&
-			leftArea && compatibleBuilding(leftArea, &area) && !leftArea->dependent )
+		if( topLeftArea && compatibleBuilding(topLeftArea, &area) && !topLeftArea->bits.test(CityArea::dependent) &&
+			leftArea && compatibleBuilding(leftArea, &area) && !leftArea->bits.test(CityArea::dependent) )
 		{
 			*io_index = topLeft;
 /***/		return const_cast<CityArea*>(topLeftArea);
 		}
-		else if( topRightArea && compatibleBuilding(topRightArea, &area) && !topRightArea->dependent &&
-			rightArea && compatibleBuilding(rightArea, &area) && !rightArea->dependent )
+		else if( topRightArea && compatibleBuilding(topRightArea, &area) && !topRightArea->bits.test(CityArea::dependent) &&
+			rightArea && compatibleBuilding(rightArea, &area) && !rightArea->bits.test(CityArea::dependent) )
 		{
 			*io_index = top;
 /***/		return const_cast<CityArea*>(topArea);
@@ -1354,21 +1376,21 @@ CityArea *CityWindow::checkLargeArea( AreaID *io_index ) const
 	}
 
 	// check the bottom neighbors if not yet found
-	if( bottomArea && compatibleBuilding(bottomArea, &area) && !bottomArea->dependent )
+	if( bottomArea && compatibleBuilding(bottomArea, &area) && !bottomArea->bits.test(CityArea::dependent) )
 	{
 		AreaID bottomLeft = leftID( bottom );
 		const CityArea	*bottomLeftArea = bottomLeft >= 0 ? m_theCity.areas + size_t(bottomLeft) : nullptr;
 		AreaID bottomRight = rightID( bottom );
 		const CityArea	*bottomRightArea = bottomRight >= 0 ? m_theCity.areas + size_t(bottomRight) : nullptr;
 
-		if( bottomLeftArea && compatibleBuilding(bottomLeftArea, &area) && !bottomLeftArea->dependent &&
-			leftArea && compatibleBuilding(leftArea, &area) && !leftArea->dependent )
+		if( bottomLeftArea && compatibleBuilding(bottomLeftArea, &area) && !bottomLeftArea->bits.test(CityArea::dependent) &&
+			leftArea && compatibleBuilding(leftArea, &area) && !leftArea->bits.test(CityArea::dependent) )
 		{
 			*io_index = left;
 /***/		return const_cast<CityArea*>(leftArea);
 		}
-		else if( bottomRightArea && compatibleBuilding(bottomRightArea, &area) && !bottomRightArea->dependent &&
-			rightArea && compatibleBuilding(rightArea, &area) && !rightArea->dependent )
+		else if( bottomRightArea && compatibleBuilding(bottomRightArea, &area) && !bottomRightArea->bits.test(CityArea::dependent) &&
+			rightArea && compatibleBuilding(rightArea, &area) && !rightArea->bits.test(CityArea::dependent) )
 		{
 /***/		return const_cast<CityArea*>(&area);
 		}
@@ -1391,6 +1413,9 @@ void CityWindow::changeAreaType( AreaID index )
 			if(s_createAreaMap.hasElement(selected) )
 			{
 				CityArea::AreaType areaType = s_createAreaMap[selected];
+
+				if( CityArea::atGREEN == areaType && randomNumber(TREE_RANDOM) < 1 )
+					area.bits.set( CityArea::tree );
 				const AreaInfo &areaInfo = s_areaInfos[areaType];
 				m_theCity.money -= areaInfo.price;
 
