@@ -76,7 +76,10 @@ using namespace winlib;
 */
 const long		START_MONEY = 10000000;				// cent
 
-const double	WORKER_FACTOR = 0.3;				// the employee part of the population
+const gak::uint64	WORKER_TRIGGER = 10;			// the employee minimum count
+const gak::uint64	LARGE_WORKER_TRIGGER = 1000;	// small city trigger
+const double	WORKER_FACTOR1 = 0.5;				// the employee part of the population for small cities
+const double	WORKER_FACTOR2 = 0.3;				// the employee part of the population for large sities
 
 // decision for constructing new residential buildings
 const double	MAX_FREE_BEDS_FACTOR = 0.2;			// the max part of free beds before constructing new buildings
@@ -286,6 +289,8 @@ class CityWindow : public OverlappedWindow
 	typedef gak::PairMap<CityArea::AreaType, AreaIDs>			AreaMapList;
 	typedef gak::PairMap<CityArea::BuildingType, gak::uint64>	BuildingCountMap;
 	
+	gak::Queue<AreaID>	m_areaQueue;
+
 	struct TheCity
 	{
 		gak::PODarray<CityArea>	areas;
@@ -300,6 +305,7 @@ class CityWindow : public OverlappedWindow
 		gak::int32				powerValue, 
 								waterValue;
 
+		gak::Queue<AreaID>		&m_areaQueue;
 		/*
 			beds and population
 		*/
@@ -311,9 +317,9 @@ class CityWindow : public OverlappedWindow
 		{
 			return beds ? double(getBedGap())/double(beds) : 0;
 		}
-		long getHomeLess() const
+		gak::uint64 getHomeLess() const
 		{
-			return long(population - beds);
+			return population > beds ? population - beds : 0;
 		}
 
 		/*
@@ -333,10 +339,19 @@ class CityWindow : public OverlappedWindow
 		}
 		size_t getWorkers() const
 		{
-			return 
-				population < 10 ? population : 
-				population < 100 ? gak::math::round<size_t>(population*WORKER_FACTOR*1.5) : 
-									gak::math::round<size_t>(population*WORKER_FACTOR);
+			gak::uint64 tmpPopulation = population;
+
+			gak::uint64 curPopulationStep = tmpPopulation  < WORKER_TRIGGER ? tmpPopulation : WORKER_TRIGGER;
+			gak::uint64 worker=curPopulationStep;
+			tmpPopulation -= curPopulationStep;
+
+			curPopulationStep = tmpPopulation  < LARGE_WORKER_TRIGGER-WORKER_TRIGGER ? tmpPopulation : LARGE_WORKER_TRIGGER-WORKER_TRIGGER;
+			worker += curPopulationStep * WORKER_FACTOR1;
+			tmpPopulation -= curPopulationStep;
+
+			worker += tmpPopulation * WORKER_FACTOR2;
+
+			return worker;
 		}
 		long getUnemployed() const
 		{
@@ -374,11 +389,15 @@ class CityWindow : public OverlappedWindow
 				if( CityArea::atUNSPEC != areaType )
 				{
 					areaMapList[areaType].addElement( id );
-				}
-				CityArea::BuildingType buildingType = area->buildingType;
-				if( CityArea::btUNSPEC != buildingType )
-				{
-					++buildingCount[buildingType];
+
+					CityArea::BuildingType buildingType = area->buildingType;
+					if( CityArea::btUNSPEC != buildingType )
+					{
+						++buildingCount[buildingType];
+					}
+					else
+						m_areaQueue.push( id );
+
 				}
 			}
 		}
@@ -409,10 +428,10 @@ class CityWindow : public OverlappedWindow
 			gak::toBinaryStream(stream, waterValue);
 		}
 
-		TheCity() :
+		TheCity(gak::Queue<AreaID >&areaQueue) :
 			areas( MAX_ARERA_ID ), 
 			money( START_MONEY ), population(1), jobs(1), occupiedJobs(1), beds(0),
-			powerValue(0), waterValue(0)
+			powerValue(0), waterValue(0), m_areaQueue(areaQueue)
 		{
 		}
 	}	m_theCity;
@@ -432,8 +451,6 @@ class CityWindow : public OverlappedWindow
 	Label					m_successLabel, m_successCount;
 
 	AreaID					m_lastToolHelp;
-
-	gak::Queue<AreaID>		m_areaQueue;
 
 	static int lineNo( AreaID index )
 	{
@@ -463,7 +480,7 @@ class CityWindow : public OverlappedWindow
 		return transportID;
 	}
 	void selectRandomArea( CityArea::AreaType type );
-	void processArea(AreaID index);
+	bool processArea(AreaID index);
 	gak::int64 getCost();
 	void nextCityStep();
 	void removeHouse( CityArea *area );
@@ -650,7 +667,7 @@ static const CreateBuildingMap s_createBuildingMap(s_buildingMapList);
 // --------------------------------------------------------------------- //
 
 CityWindow::CityWindow() : OverlappedWindow( nullptr ), 
-	m_tools(nullptr), m_creatSelector(nullptr), m_lastToolHelp(-1)
+	m_tools(nullptr), m_creatSelector(nullptr), m_lastToolHelp(-1), m_theCity( m_areaQueue )
 {
 	setText("Stadtsimulation");
 }
@@ -819,8 +836,9 @@ void CityWindow::selectRandomArea( CityArea::AreaType type )
 	}
 }
 
-void CityWindow::processArea(AreaID index)
+bool CityWindow::processArea(AreaID index)
 {
+	bool		processed = false;
 	CityArea	&area = m_theCity.areas[index];
 	AreaID		masterIndex = index;
 	CityArea	*master = checkLargeArea( &masterIndex );
@@ -880,13 +898,15 @@ void CityWindow::processArea(AreaID index)
 	{
 		if( master )
 		{
-			if( constructHouse( master, masterIndex, newType ) )
+			if( (processed = constructHouse( master, masterIndex, newType )) == true )
 				createLargeArea( master, masterIndex );
 		}
 		else if( !area.bits.test(CityArea::dependent) )
-			constructHouse( &area, index, newType );
+			processed = constructHouse( &area, index, newType );
+
 		updateStatus();
 	}
+	return processed;
 }
 
 gak::int64 CityWindow::getCost()
@@ -1665,8 +1685,9 @@ void CityWindow::handleTimer()
 {
 	if( m_areaQueue.size() )
 	{
-		processArea( m_areaQueue.pop() );
-
+		AreaID areaID = m_areaQueue.pop();
+		if( !processArea( areaID ) )
+			m_areaQueue.push(areaID);
 	}
 	else
 	{
