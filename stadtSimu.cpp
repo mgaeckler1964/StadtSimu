@@ -556,17 +556,17 @@ typedef BuildingInfoMap::value_type							BuildingInfoPair;
 static const BuildingInfoPair s_buildingInfoList[] =
 {	//																  Name							Price	Beds/Jobs	Power/Water	Icon			For People 
 	//																													Consumption					Count
-	BuildingInfoPair( CityArea::pbtSMALL_LIVING,		BuildingInfo( "Kleines Wohngebäude",		-1,		10, 0,		10,	10,		&s_livingS			) ),
-	BuildingInfoPair( CityArea::pbtLARGE_LIVING,		BuildingInfo( "Großes Wohngebäude",			-1,		100, 0,		100, 100,	&s_livingL			) ),
-	BuildingInfoPair( CityArea::pbtSMALL_COMMERCIAL,	BuildingInfo( "Kleines Geschäftsgebäude",	-1,		0, 10,		10, 10,		&s_commercialS		) ),
-	BuildingInfoPair( CityArea::pbtLARGE_COMMERCIAL,	BuildingInfo( "Großes Geschäftsgebäude",	-1,		0, 100,		100, 100,	&s_commercialL		) ),
-	BuildingInfoPair( CityArea::pbtSMALL_INDUSTRY,		BuildingInfo( "Gewerbehaus",				-1,		0, 10,		20, 10,		&s_industryS		) ),
-	BuildingInfoPair( CityArea::pbtLARGE_INDUSTRY,		BuildingInfo( "Fabrik",						-1,		0, 200,		400, 100,	&s_industryL		) ),
-	BuildingInfoPair( CityArea::btFIRE,					BuildingInfo( "Feuerwehr",					100000,	0, 20,		10, 100,	&s_fire,		500	) ),
-	BuildingInfoPair( CityArea::btPOLICE,				BuildingInfo( "Polizei",					100000,	0, 20,		20, 20,		&s_police,		500	) ),
-	BuildingInfoPair( CityArea::btHOSPITAL,				BuildingInfo( "Ärzte",						100000,	0, 20,		20, 20,		&s_hospital,	500	) ),
-	BuildingInfoPair( CityArea::btSCHOOL,				BuildingInfo( "Bildung",					50000,	0, 10,		20, 20,		nullptr,		500	) ),
-	BuildingInfoPair( CityArea::btTOWN_HALL,			BuildingInfo( "Rathaus",					50000,	0, 10,		20, 20,		&s_townHall,	500	) ),
+	BuildingInfoPair( CityArea::pbtSMALL_LIVING,		BuildingInfo( "Kleines Wohngebäude",		-1,		10, 0,		10,	10,		&s_livingS				) ),
+	BuildingInfoPair( CityArea::pbtLARGE_LIVING,		BuildingInfo( "Großes Wohngebäude",			-1,		100, 0,		100, 100,	&s_livingL				) ),
+	BuildingInfoPair( CityArea::pbtSMALL_COMMERCIAL,	BuildingInfo( "Kleines Geschäftsgebäude",	-1,		0, 10,		10, 10,		&s_commercialS			) ),
+	BuildingInfoPair( CityArea::pbtLARGE_COMMERCIAL,	BuildingInfo( "Großes Geschäftsgebäude",	-1,		0, 100,		100, 100,	&s_commercialL			) ),
+	BuildingInfoPair( CityArea::pbtSMALL_INDUSTRY,		BuildingInfo( "Gewerbehaus",				-1,		0, 10,		20, 10,		&s_industryS			) ),
+	BuildingInfoPair( CityArea::pbtLARGE_INDUSTRY,		BuildingInfo( "Fabrik",						-1,		0, 200,		400, 100,	&s_industryL			) ),
+	BuildingInfoPair( CityArea::btFIRE,					BuildingInfo( "Feuerwehr",					100000,	0, 20,		10, 100,	&s_fire,		5000	) ),
+	BuildingInfoPair( CityArea::btPOLICE,				BuildingInfo( "Polizei",					100000,	0, 20,		20, 20,		&s_police,		5000	) ),
+	BuildingInfoPair( CityArea::btHOSPITAL,				BuildingInfo( "Ärzte",						100000,	0, 20,		20, 20,		&s_hospital,	5000	) ),
+	BuildingInfoPair( CityArea::btSCHOOL,				BuildingInfo( "Bildung",					50000,	0, 10,		20, 20,		nullptr,		5000	) ),
+	BuildingInfoPair( CityArea::btTOWN_HALL,			BuildingInfo( "Rathaus",					50000,	0, 10,		20, 20,		&s_townHall,	5000	) ),
 	BuildingInfoPair( CityArea::btENERGY,				BuildingInfo( "Kraftwerk",					300000, 0, 5,		-2000, 0,	&s_voltaic ) ),
 	BuildingInfoPair( CityArea::btWATER_PLANT,			BuildingInfo( "Wasserwerk",					200000, 0, 5,		0,-2000,	&s_waterPlant ) ),
 };
@@ -898,11 +898,11 @@ gak::int64 CityWindow::getCost()
 	} 
 	s_publicBuildingCost[] =
 	{
-		{CityArea::btTOWN_HALL, TOWN_HALL_COST},
-		{CityArea::btFIRE, FIRE_COST},
-		{CityArea::btPOLICE, POLICE_COST},
-		{CityArea::btSCHOOL, SCHOOL_COST},
-		{CityArea::btHOSPITAL, HOSPITAL_COST},
+		{CityArea::btTOWN_HALL,	TOWN_HALL_COST},
+		{CityArea::btFIRE,		FIRE_COST},
+		{CityArea::btPOLICE,	POLICE_COST},
+		{CityArea::btSCHOOL,	SCHOOL_COST},
+		{CityArea::btHOSPITAL,	HOSPITAL_COST},
 	};
 
 	gak::int64	cost = MAYOR_INCOME;
@@ -939,8 +939,10 @@ void CityWindow::nextCityStep()
 	const double success = s_scale(getSuccessFactor());
 
 	const long popuLationChange=gak::math::round<long>(double((bedsPopulationChange + jobPopulationChange)/2)*success);
-
-	m_theCity.population += popuLationChange;
+	if( -popuLationChange >= gak::int64(m_theCity.population) )
+		m_theCity.population = 1;
+	else
+		m_theCity.population += popuLationChange;
 
 	long match = gak::math::min( freeJobs, unemployed );
 	if( match > 0 )
