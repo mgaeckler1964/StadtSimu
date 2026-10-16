@@ -339,19 +339,13 @@ class CityWindow : public OverlappedWindow
 		}
 		size_t getWorkers() const
 		{
-			gak::uint64 tmpPopulation = population;
-
-			gak::uint64 curPopulationStep = tmpPopulation  < WORKER_TRIGGER ? tmpPopulation : WORKER_TRIGGER;
-			gak::uint64 worker=curPopulationStep;
-			tmpPopulation -= curPopulationStep;
-
-			curPopulationStep = tmpPopulation  < LARGE_WORKER_TRIGGER-WORKER_TRIGGER ? tmpPopulation : LARGE_WORKER_TRIGGER-WORKER_TRIGGER;
-			worker += curPopulationStep * WORKER_FACTOR1;
-			tmpPopulation -= curPopulationStep;
-
-			worker += tmpPopulation * WORKER_FACTOR2;
-
-			return worker;
+			static gak::math::ProgressTriggerFactor workerFactors[] =
+			{
+				{WORKER_TRIGGER, 1},
+				{LARGE_WORKER_TRIGGER, WORKER_FACTOR1},
+				{0, WORKER_FACTOR2}
+			};
+			return gak::math::round<size_t>(gak::math::progressiveFactor(double(population), workerFactors));
 		}
 		long getUnemployed() const
 		{
@@ -380,6 +374,8 @@ class CityWindow : public OverlappedWindow
 		*/
 		void rebuild()
 		{
+			// the list of areas with private buildings
+			static const CityArea::AreaType buildingAreas[] = {CityArea::atLIVING, CityArea::atCOMMERCIAL, CityArea::atINDUSTRY};
 			CityArea *area = areas.getDataHandle();
 			AreaID id = 0;
 
@@ -395,8 +391,17 @@ class CityWindow : public OverlappedWindow
 					{
 						++buildingCount[buildingType];
 					}
-					else
-						m_areaQueue.push( id );
+					else 
+					{
+						FOR_EACH( i, buildingAreas, 
+						{
+							if( areaType == buildingAreas[i] && !area->dependent )
+							{
+								m_areaQueue.push( id );
+								break;
+							}
+						});
+					}
 
 				}
 			}
@@ -838,7 +843,6 @@ void CityWindow::selectRandomArea( CityArea::AreaType type )
 
 bool CityWindow::processArea(AreaID index)
 {
-	bool		processed = false;
 	CityArea	&area = m_theCity.areas[index];
 	AreaID		masterIndex = index;
 	CityArea	*master = checkLargeArea( &masterIndex );
@@ -898,15 +902,15 @@ bool CityWindow::processArea(AreaID index)
 	{
 		if( master )
 		{
-			if( (processed = constructHouse( master, masterIndex, newType )) == true )
+			if( constructHouse( master, masterIndex, newType ) )
 				createLargeArea( master, masterIndex );
 		}
 		else if( !area.bits.test(CityArea::dependent) )
-			processed = constructHouse( &area, index, newType );
+			constructHouse( &area, index, newType );
 
 		updateStatus();
 	}
-	return processed;
+	return CityArea::btUNSPEC != area.buildingType || area.dependent;
 }
 
 gak::int64 CityWindow::getCost()
