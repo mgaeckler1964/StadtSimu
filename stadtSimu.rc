@@ -24,6 +24,13 @@ IDI_WATER_PLANT			ICON	"waterPlant.ico"
 
 IDI_RAIL_CROSSING		ICON	"railCrossing.ico"
 
+STRINGTABLE
+BEGIN
+	FILE_OPEN_TITLE, "Stadt öffnen"	
+	FILE_SAVE_TITLE, "Stadt speichern"	
+	CITY_FILES, "Stadt(*.city)|*.city|Alle Dateien(*.*)|*.*|"
+END
+
 1 VERSIONINFO
 FILEVERSION 1, 0, 0, 0
 PRODUCTVERSION 1, 0, 0, 0
@@ -37,7 +44,7 @@ BEGIN
 	  VALUE "FileDescription", "Stadtsimulation für Windows\000"
 	  VALUE "FileVersion", "1.0\000"
 	  VALUE "InternalName", "winapp\000"
-	  VALUE "LegalCopyright", "Copyright 8 2026. All Rights Reserved.\000"
+	  VALUE "LegalCopyright", "Copyright (c) 2026. All Rights Reserved.\000"
 	  VALUE "LegalTrademarks", "Windows(TM) is a trademark of Microsoft Corporation\000"
 	  VALUE "OriginalFilename", "stadtSimu.exe\000"
 	  VALUE "ProductName", "StadtSimu\000"

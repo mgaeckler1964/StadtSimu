@@ -41,12 +41,15 @@
 #include <gak/array.h>
 #include <gak/queue.h>
 #include <gak/iostream.h>
+#include <gak/directory.h>
 
 #include <winlib/ControlWindow.h>
 #include <winlib/WINAPP.H>
 #include <winlib/POPUP.H>
 #include <winlib/DEVICE.H>
 #include <winlib/colors.h>
+#include <WINLIB/StandardDialogs.h>
+#include <WINLIB/FileTypeRegistry.h>
 
 #include "stadtSimu_rc.h"
 
@@ -71,13 +74,14 @@ using namespace winlib;
 // ----- constants ----------------------------------------------------- //
 // --------------------------------------------------------------------- //
 
+typedef gak::uint32		count_t;
 /*
 	here are the constant for the city emulation engine
 */
 const long		START_MONEY = 10000000;				// cent
 
-const gak::uint64	WORKER_TRIGGER = 10;			// the employee minimum count
-const gak::uint64	LARGE_WORKER_TRIGGER = 1000;	// small city trigger
+const count_t	WORKER_TRIGGER = 10;			// the employee minimum count
+const count_t	LARGE_WORKER_TRIGGER = 1000;	// small city trigger
 const double	WORKER_FACTOR1 = 0.5;				// the employee part of the population for small cities
 const double	WORKER_FACTOR2 = 0.3;				// the employee part of the population for large sities
 
@@ -88,7 +92,7 @@ const double	MAX_FREE_BEDS_FACTOR_LARGE = 0.1;	// ... for large buildings
 // decision for constructing new commercial/industrial buildings
 const double	MAX_FREE_JOBS_FACTOR = 0.2;			// the max part of free jobs before constructing new buildings
 const double	MAX_FREE_JOBS_FACTOR_LARGE = 0.1;	// ... for large buildings
-const size_t	MINIMUM_JOB_COUNT = 100;			// the minimum number of jobs, if there are fewer jobs we do not check the job factors
+const count_t	MINIMUM_JOB_COUNT = 100;			// the minimum number of jobs, if there are fewer jobs we do not check the job factors
 
 // decision for moving into the city
 const double	POPULATION_CHANGE_BY_BEDS = 0.1;	// moving in factor by free beds
@@ -160,9 +164,12 @@ enum CreateType {
 	ctWaterPlant,
 };
 
-const char FILE_NAME[]="theCity.city";
-const gak::uint32 magic = 0x3826;
-const gak::uint16 version = 0x1;
+static const char CITY_EXTENSION[]=".city";
+
+static const char REGISTRY_NAME[]="lastCityFile";
+static const char DEFAULT_CITY_FILE[]="theCity.city";
+static const gak::uint32 magic = 0x3826;
+static const gak::uint16 version = 0x1;
 
 // --------------------------------------------------------------------- //
 // ----- macros -------------------------------------------------------- //
@@ -201,15 +208,15 @@ struct AreaInfo
 
 struct BuildingInfo
 {
-	const char	*name;
-	gak::int64	price;
-	size_t		beds,
-				jobs,
-				supportCount;
-	long		powerReq,
-				waterReq;
-	Icon		*icon;
-	BuildingInfo(const char *name=nullptr, gak::int64 price=0, size_t beds=0, size_t jobs=0, long powerReq=0, long waterReq=0, Icon *icon=nullptr, size_t supportCount=0) 
+	const char		*name;
+	gak::int64		price;
+	count_t			beds,
+					jobs,
+					supportCount;
+	long			powerReq,
+					waterReq;
+	Icon			*icon;
+	BuildingInfo(const char *name=nullptr, gak::int64 price=0, count_t beds=0, count_t jobs=0, long powerReq=0, long waterReq=0, Icon *icon=nullptr, count_t supportCount=0) 
 		: name(name), price(price),
 		beds(beds), jobs(jobs), 
 		powerReq(powerReq), waterReq(waterReq), 
@@ -287,7 +294,7 @@ class CityWindow : public OverlappedWindow
 	typedef long												AreaID;
 	typedef gak::PODarray<AreaID>								AreaIDs;
 	typedef gak::PairMap<CityArea::AreaType, AreaIDs>			AreaMapList;
-	typedef gak::PairMap<CityArea::BuildingType, gak::uint64>	BuildingCountMap;
+	typedef gak::PairMap<CityArea::BuildingType, count_t>		BuildingCountMap;
 	
 	gak::Queue<AreaID>	m_areaQueue;
 
@@ -298,7 +305,7 @@ class CityWindow : public OverlappedWindow
 		BuildingCountMap		buildingCount;
 
 		gak::int64				money;
-		gak::uint64				population,
+		count_t					population,
 								beds,
 								jobs,
 								occupiedJobs;
@@ -317,7 +324,7 @@ class CityWindow : public OverlappedWindow
 		{
 			return beds ? double(getBedGap())/double(beds) : 0;
 		}
-		gak::uint64 getHomeLess() const
+		count_t getHomeLess() const
 		{
 			return population > beds ? population - beds : 0;
 		}
@@ -337,7 +344,7 @@ class CityWindow : public OverlappedWindow
 		{
 			return jobs ? double(occupiedJobs)/double(jobs) : 0;
 		}
-		size_t getWorkers() const
+		count_t getWorkers() const
 		{
 			static gak::math::ProgressTriggerFactor workerFactors[] =
 			{
@@ -345,7 +352,7 @@ class CityWindow : public OverlappedWindow
 				{LARGE_WORKER_TRIGGER, WORKER_FACTOR1},
 				{0, WORKER_FACTOR2}
 			};
-			return gak::math::round<size_t>(gak::math::progressiveFactor(double(population), workerFactors));
+			return gak::math::round<count_t>(gak::math::progressiveFactor(double(population), workerFactors));
 		}
 		long getUnemployed() const
 		{
@@ -353,7 +360,7 @@ class CityWindow : public OverlappedWindow
 		}
 		double getUnemployedFactor() const
 		{
-			size_t workers = getWorkers();
+			count_t workers = getWorkers();
 			if( workers )
 			{
 				return double(getUnemployed())/double(workers);
@@ -364,9 +371,9 @@ class CityWindow : public OverlappedWindow
 		/*
 			Areas
 		*/
-		size_t getAreaCount( CityArea::AreaType areaType ) const
+		count_t getAreaCount( CityArea::AreaType areaType ) const
 		{
-			return areaMapList.hasElement(areaType) ? areaMapList[areaType].size() : 0;
+			return areaMapList.hasElement(areaType) ? count_t(areaMapList[areaType].size()) : 0;
 		}
 
 		/*
@@ -379,7 +386,7 @@ class CityWindow : public OverlappedWindow
 			CityArea *area = areas.getDataHandle();
 			AreaID id = 0;
 
-			for( ; id < areas.size(); ++id, ++area )
+			for( ; id < long(areas.size()); ++id, ++area )
 			{
 				CityArea::AreaType areaType = area->areaType;
 				if( CityArea::atUNSPEC != areaType )
@@ -457,6 +464,24 @@ class CityWindow : public OverlappedWindow
 
 	AreaID					m_lastToolHelp;
 
+	STRING					m_fileName;
+	public:
+	void setFileName( const STRING &fileName )
+	{
+		m_fileName = fileName;
+		appObject->WriteProfile( false, "", REGISTRY_NAME, fileName );
+	}
+	static STRING getFileName()
+	{
+		STRING fileName = appObject->GetProfile( "", REGISTRY_NAME, nullptr );
+		if( fileName.isEmpty() )
+		{
+			fileName = gak::getPersonalDocs().condAppend(DIRECTORY_DELIMITER).add(DEFAULT_CITY_FILE);
+		}
+		return fileName;
+	}
+
+	private:
 	static int lineNo( AreaID index )
 	{
 		assertValidID( index );
@@ -511,6 +536,7 @@ class CityWindow : public OverlappedWindow
 	ProcessStatus handleMouseMove( ModifierFlags modifier, const Point &position ) override;
 	ProcessStatus handleLeftButton( LeftButton leftButton, ModifierFlags modifier, const Point &position ) override;
 	ProcessStatus handleRepaint( Device &hDC ) override;
+	ProcessStatus handleCommand( int cmd ) override;
 	void handleTimer() override;
 
 	/*
@@ -520,22 +546,13 @@ class CityWindow : public OverlappedWindow
 
 	public:
 	CityWindow();
+	void loadFile( STRING fileName );
 };
 
 class StadtSimulationApp : public Application
 {
-	bool startApplication( HINSTANCE /*hInstance*/, const char * /*cmdLine*/ ) override;
-	CallbackWindow *createMainWindow( const char * /*cmdLine*/, int /*nCmdShow*/ ) override
-	{
-		std::unique_ptr<CityWindow>	mainWindow( new CityWindow );
-		if( mainWindow->create( nullptr ) == scERROR )
-		{
-			throw gak::LibraryException( "Could not create window!" );
-		}
-
-		mainWindow->focus();
-		return mainWindow.release();
-	}
+	bool startApplication( HINSTANCE hInstance, const char *cmdLine ) override;
+	CallbackWindow *createMainWindow( const char * cmdLine, int nCmdShow ) override;
 	void deleteMainWindow( BasicWindow  *mainWindow ) override
 	{
 		delete mainWindow;
@@ -788,19 +805,19 @@ double CityWindow::getSuccessFactor() const
 		const BuildingInfo &info = s_buildingInfos[buildingType];
 		if( m_theCity.buildingCount.hasElement(buildingType) )
 		{
-			const size_t count = m_theCity.buildingCount[buildingType];
+			const count_t count = m_theCity.buildingCount[buildingType];
 			successFactor.add( gak::math::min(double(count * info.supportCount) / population,1.0) );
 		}
 	});
 
-	const std::size_t	greenCount = m_theCity.getAreaCount(CityArea::atGREEN);
-	const std::size_t	waterCount = m_theCity.getAreaCount(CityArea::atWATER);
-	const std::size_t	goodCount = greenCount + waterCount;
+	const count_t	greenCount = m_theCity.getAreaCount(CityArea::atGREEN);
+	const count_t	waterCount = m_theCity.getAreaCount(CityArea::atWATER);
+	const count_t	goodCount = greenCount + waterCount;
 
-	const std::size_t	livingCount = m_theCity.getAreaCount(CityArea::atLIVING);
-	const std::size_t	commercialCount = m_theCity.getAreaCount(CityArea::atCOMMERCIAL);
-	const std::size_t	industryCount = m_theCity.getAreaCount(CityArea::atINDUSTRY);
-	const std::size_t	badCount = livingCount + commercialCount + industryCount;
+	const count_t	livingCount = m_theCity.getAreaCount(CityArea::atLIVING);
+	const count_t	commercialCount = m_theCity.getAreaCount(CityArea::atCOMMERCIAL);
+	const count_t	industryCount = m_theCity.getAreaCount(CityArea::atINDUSTRY);
+	const count_t	badCount = livingCount + commercialCount + industryCount;
 
 	successFactor.add( badCount ? gak::math::min(double(goodCount) / badCount,1.0) : 0);
 
@@ -933,7 +950,7 @@ gak::int64 CityWindow::getCost()
 	const double ocupiedJobsFactor = m_theCity.getOcupiedJobFactor();
 	FOR_EACH( i, s_publicBuildingCost, {
 		const CityArea::BuildingType	type = s_publicBuildingCost[i].type;
-		const gak::uint64				count = m_theCity.buildingCount[type];
+		const count_t					count = m_theCity.buildingCount[type];
 
 		cost += count * s_publicBuildingCost[i].cost;
 		cost += gak::math::round<gak::int64>(s_buildingInfos[type].jobs * count * WORKER_TAX * 2 * ocupiedJobsFactor);
@@ -1057,8 +1074,8 @@ void CityWindow::showToolHelp(AreaID index)
 			if( CityArea::btUNSPEC != buildingType && s_buildingInfos.hasElement( buildingType ) )
 			{
 				const BuildingInfo &info = s_buildingInfos[buildingType];
-				const size_t count = m_theCity.buildingCount[buildingType];
-				const size_t supportCount = info.supportCount * count;
+				const count_t count = m_theCity.buildingCount[buildingType];
+				const count_t supportCount = info.supportCount * count;
 
 				helpText = info.name;
 				if( supportCount )
@@ -1533,7 +1550,44 @@ bool StadtSimulationApp::startApplication( HINSTANCE /*hInstance*/, const char *
 
 	s_railCrossing	= loadIcon( IDI_RAIL_CROSSING );
 
+	FileTypeRegistry	ftReg =
+	{
+		CITY_EXTENSION,							// .extension
+		"city_file",							// .type
+		"Stadtsimulation",						// .type_description
+		nullptr,								// .icon
+		"open",									// .cmd
+		"&open",								// .cmd_description
+		STRING(getFileName()).add(" \"%1\"")	// commandLine
+	};
+	addFileType(&ftReg);
+
 	return 0;
+}
+
+CallbackWindow *StadtSimulationApp::createMainWindow( const char * cmdLine, int /*nCmdShow*/ )
+{
+	std::unique_ptr<CityWindow>	mainWindow( new CityWindow );
+	static ACCEL accelerators[] =
+	{
+		{ FVIRTKEY|FCONTROL,	'N', FILE_NEW_id },
+		{ FVIRTKEY|FCONTROL,	'O', FILE_OPEN_id },
+		{ FVIRTKEY|FCONTROL,	'S', FILE_SAVE_id },
+		{ FVIRTKEY|FALT,		'X', FILE_EXIT_id },
+	};
+	mainWindow->setAccelerators( accelerators );
+	if( mainWindow->create( nullptr ) == scERROR )
+	{
+		throw gak::LibraryException( "Could not create window!" );
+	}
+
+	STRING fileName = gak::isEmpty(cmdLine) ? CityWindow::getFileName() : STRING(cmdLine).stripChar('\"');
+	if( gak::exists(fileName) )
+		mainWindow->loadFile( fileName );
+	else
+		mainWindow->setFileName(fileName);
+	mainWindow->focus();
+	return mainWindow.release();
 }
 
 ProcessStatus CityWindow::handleCreate()
@@ -1601,16 +1655,6 @@ ProcessStatus CityWindow::handleCreate()
 
 	m_tools.resize( COMBO_WIDTH, y );
 	m_tools.adjustWindoRect();
-
-	try
-	{
-		gak::readFromBinaryFile( FILE_NAME, &m_theCity, magic, version, false );
-	}
-	catch( ... )
-	{
-		gak::strRemove(FILE_NAME);
-	}
-
 	updateStatus();
 
 	setTimer(1000);
@@ -1620,11 +1664,14 @@ ProcessStatus CityWindow::handleCreate()
 
 SuccessCode CityWindow::handleClose()
 {
-	gak::writeToBinaryFile(
-		FILE_NAME, m_theCity,
-		magic, version,
-		gak::owmOverwrite
-	);
+	if( !m_fileName.isEmpty() )
+	{
+		gak::writeToBinaryFile(
+			m_fileName, m_theCity,
+			magic, version,
+			gak::owmOverwrite
+		);
+	}
 	return OverlappedWindow::handleClose();
 }
 
@@ -1685,6 +1732,54 @@ ProcessStatus CityWindow::handleRepaint( Device &hDC )
 	return psPROCESSED;
 }
 
+ProcessStatus CityWindow::handleCommand( int cmd )
+{
+	switch( cmd )
+	{
+	case FILE_NEW_id:
+		// not yet implemented
+		/// TODO: implement
+		break;
+			
+	case FILE_OPEN_id:
+	{
+		OpenFileDialog	dialog;
+		dialog.setFilename(m_fileName);
+		if( dialog.create( this, FILE_OPEN_TITLE, CITY_FILES ) )
+		{
+			loadFile( dialog.getFilename() );
+		}
+		break;
+	}
+	case FILE_SAVE_id:
+	{
+		SaveFileAsDialog	dialog;
+		dialog.setFilename(m_fileName);
+		if( dialog.create( this, FILE_SAVE_TITLE, CITY_FILES ) )
+		{
+			STRING fileName = dialog.getFilename();
+			if( fileName.searchChar( '.' ) == fileName.no_index )
+				fileName += CITY_EXTENSION;
+			setFileName( fileName );
+
+			gak::writeToBinaryFile(
+				fileName, m_theCity,
+				magic, version,
+				gak::owmOverwrite
+			);
+
+		}
+		break;
+	}
+	case FILE_EXIT_id:
+		close();
+		break;
+	default:
+		return OverlappedWindow::handleCommand( cmd );
+	}
+	return psPROCESSED;
+}
+
 void CityWindow::handleTimer()
 {
 	if( m_areaQueue.size() )
@@ -1705,6 +1800,12 @@ void CityWindow::handleTimer()
 // --------------------------------------------------------------------- //
 // ----- class publics ------------------------------------------------- //
 // --------------------------------------------------------------------- //
+
+void CityWindow::loadFile( STRING fileName )
+{
+	setFileName( fileName.stripChar('\"') );
+	gak::readFromBinaryFile( fileName, &m_theCity, magic, version, true );
+}
 
 // --------------------------------------------------------------------- //
 // ----- entry points -------------------------------------------------- //
