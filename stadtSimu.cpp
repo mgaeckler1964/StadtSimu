@@ -552,7 +552,7 @@ class CityWindow : public OverlappedWindow
 class StadtSimulationApp : public Application
 {
 	bool startApplication( HINSTANCE hInstance, const char *cmdLine ) override;
-	CallbackWindow *createMainWindow( const char * cmdLine, int nCmdShow ) override;
+	CallbackWindow *createMainWindow( const char * cmdLine, winlib::ShowWindowMode nCmdShow ) override;
 	void deleteMainWindow( BasicWindow  *mainWindow ) override
 	{
 		delete mainWindow;
@@ -1189,7 +1189,7 @@ void CityWindow::drawShape( Device &dev, int x, int y, const Border &border )
 {
 	if( border.count < 2)
 	{
-		dev.rectangle( x, y, x+AREA_PIXEL_SIZE+1, y+AREA_PIXEL_SIZE+1 );
+		dev.drawRectangle( x, y, x+AREA_PIXEL_SIZE+1, y+AREA_PIXEL_SIZE+1 );
 	}
 	else if( border.count == 2 )
 	{
@@ -1216,7 +1216,7 @@ void CityWindow::drawShape( Device &dev, int x, int y, const Border &border )
 		}
 		else
 		{
-			dev.rectangle( x, y, x+AREA_PIXEL_SIZE+1, y+AREA_PIXEL_SIZE+1 );
+			dev.drawRectangle( x, y, x+AREA_PIXEL_SIZE+1, y+AREA_PIXEL_SIZE+1 );
 		}
 	}
 	else if( border.count == 3 )
@@ -1318,7 +1318,7 @@ void CityWindow::drawArea( Device &dev, AreaID index, int x, int y )
 	}
 
 	dev.getBrush().create( color );
-	dev.rectangle( x, y, x+AREA_PIXEL_SIZE+1, y+AREA_PIXEL_SIZE+1 );
+	dev.drawRectangle( x, y, x+AREA_PIXEL_SIZE+1, y+AREA_PIXEL_SIZE+1 );
 
 	if( hasShape )
 	{
@@ -1565,7 +1565,7 @@ bool StadtSimulationApp::startApplication( HINSTANCE /*hInstance*/, const char *
 	return 0;
 }
 
-CallbackWindow *StadtSimulationApp::createMainWindow( const char * cmdLine, int /*nCmdShow*/ )
+CallbackWindow *StadtSimulationApp::createMainWindow( const char * cmdLine, winlib::ShowWindowMode /*nCmdShow*/ )
 {
 	std::unique_ptr<CityWindow>	mainWindow( new CityWindow );
 	static ACCEL accelerators[] =
