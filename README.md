@@ -1,15 +1,17 @@
-# StadtSimul
+ï»¿# StadtSimul
 Stadt Simulation
 
 
-Requires Winlib and Gaklib.
+Erfordert Winlib und Gaklib.
 
 Dies ist eine einfache Stadtsimulation.
 
-Du  baust  Straßen,  Trambahnen, Kraftwerke,  Wasserwerke,  Rathäuser,  Polizei,
-Feuerwehren,  Schulen und  Krankenhäuser.  Darüber  hinaus weistDu  Wohngebiete,
-Gewerbe- und  Industrieflächen aus. Du  kannst auch die  Stadtfläche verschönern
-indem Du Wasser- und Landflächen erzeugst.
+Du  baust  StraÃŸen,  Trambahnen, Kraftwerke,  Wasserwerke,  RathÃ¤user,  Polizei,
+Feuerwehren,  Schulen und  KrankenhÃ¤user.  DarÃ¼ber  hinaus weistDu  Wohngebiete,
+Gewerbe- und  IndustrieflÃ¤chen aus. Du  kannst auch die  StadtflÃ¤che verschÃ¶nern
+indem Du Wasser- und LandflÃ¤chen erzeugst.
 
-Die  Simulationsmetriken  müssen  noch  erarbeitet  werden,  um  eine  möglichst
-realistische Simulation zu erreichen.
+Die  Simulationsmetriken  mÃ¼ssen  noch  erarbeitet  werden,  um  eine  mÃ¶glichst
+realistische Simulation zu erreichen. Der SpielespaÃŸ ist aber im Vordergrund.
+
+<img width="839" height="828" alt="screen" src="https://github.com/user-attachments/assets/1f443d0f-75e8-417a-824b-4617e5c22c40" />
