@@ -246,6 +246,7 @@ struct CityArea
 	static const int dependent = 0;
 	static const int master = 1;
 	static const int tree = 2;
+	static const int inQueue = 3;
 	gak::Bitfield	bits;
 	gak::int32	width, height;
 
@@ -258,6 +259,18 @@ struct CityArea
 	void makeDependent()
 	{
 		bits.set( dependent );
+	}
+	bool isSelfMaster() const
+	{
+		return bits.test(master) || !bits.test(dependent);
+	}
+	bool isSlave() const
+	{
+		return bits.test(dependent) && !bits.test(master);
+	}
+	bool isPrivateBuildingArea()
+	{
+		return areaType >= atLIVING && areaType <= atINDUSTRY;
 	}
 	void fromBinaryStream( std::istream &stream );
 	void toBinaryStream( std::ostream &stream ) const;
@@ -382,14 +395,14 @@ class CityWindow : public OverlappedWindow
 		void rebuild()
 		{
 			// the list of areas with private buildings
-			static const CityArea::AreaType buildingAreas[] = {CityArea::atLIVING, CityArea::atCOMMERCIAL, CityArea::atINDUSTRY};
-			CityArea *area = areas.getDataHandle();
+		CityArea *area = areas.getDataHandle();
 			AreaID id = 0;
 
 			for( ; id < long(areas.size()); ++id, ++area )
 			{
+				area->bits.clear(CityArea::inQueue);
 				CityArea::AreaType areaType = area->areaType;
-				if( CityArea::atUNSPEC != areaType )
+				if( CityArea::atUNSPEC != areaType && area->isSelfMaster() )
 				{
 					areaMapList[areaType].addElement( id );
 
@@ -400,14 +413,12 @@ class CityWindow : public OverlappedWindow
 					}
 					else 
 					{
-						FOR_EACH( i, buildingAreas, 
+						doLogPosition();
+						if( area->isPrivateBuildingArea() && !area->dependent )
 						{
-							if( areaType == buildingAreas[i] && !area->dependent )
-							{
-								m_areaQueue.push( id );
-								break;
-							}
-						});
+							area->bits.set(CityArea::inQueue);
+							m_areaQueue.push( id );
+						}
 					}
 
 				}
@@ -461,6 +472,7 @@ class CityWindow : public OverlappedWindow
 	Label					m_separator;
 	Label					m_workerLabel, m_workerCount;
 	Label					m_successLabel, m_successCount;
+	Label					m_queueLabel, m_queueCount;
 
 	AreaID					m_lastToolHelp;
 
@@ -523,7 +535,7 @@ class CityWindow : public OverlappedWindow
 		return price;
 	}
 	void showToolHelp(AreaID index);
-	void updateStatus();
+	void updateStatusDisplay();
 	Border calcBorder( AreaID index );
 	void drawShape( Device &dev, int x, int y, const Border &border );
 	void drawArea( Device &dev, AreaID index, int x, int y );
@@ -853,7 +865,10 @@ void CityWindow::selectRandomArea( CityArea::AreaType type )
 		if( size )
 		{
 			const size_t sel = size_t(randomNumber(int(list.size())));
-			m_areaQueue.push( int(list[sel]) );
+			AreaID id = int(list[sel]);
+			CityArea &area = m_theCity.areas[id];
+			area.bits.set( CityArea::inQueue );
+			m_areaQueue.push( id );
 		}
 	}
 }
@@ -925,9 +940,12 @@ bool CityWindow::processArea(AreaID index)
 		else if( !area.bits.test(CityArea::dependent) )
 			constructHouse( &area, index, newType );
 
-		updateStatus();
+		updateStatusDisplay();
 	}
-	return CityArea::btUNSPEC != area.buildingType || area.dependent;
+	bool result = CityArea::btUNSPEC != area.buildingType || area.dependent;
+	if( result )
+		area.bits.clear( CityArea::inQueue );
+	return result;
 }
 
 gak::int64 CityWindow::getCost()
@@ -996,7 +1014,7 @@ void CityWindow::nextCityStep()
 		m_theCity.money -= unemployed*UNEMPLOY_LOSS;
 	}
 	m_theCity.money += ((m_theCity.occupiedJobs * WORKER_TAX) - getCost());
-	updateStatus();
+	updateStatusDisplay();
 }
 
 void CityWindow::removeHouse( CityArea *area )
@@ -1099,7 +1117,7 @@ void CityWindow::showToolHelp(AreaID index)
 	}
 }
 
-void CityWindow::updateStatus()
+void CityWindow::updateStatusDisplay()
 {
 	m_moneyCount.setText(
 		gak::NumberBuffer().addFloat( m_theCity.money/100.0, 0, 2, ' ', ',' ).add( " €" ).c_str()
@@ -1131,6 +1149,11 @@ void CityWindow::updateStatus()
 	m_successCount.setText(
 		gak::NumberBuffer().addNumber(getSuccessFactor()*100, 0, 1, 0 ).addDigit('%').c_str()
 	);
+
+	m_queueCount.setText(
+		gak::NumberBuffer().addNumber(m_areaQueue.size(), 0, 0 ).c_str()
+	);
+
 
 
 	invalidateWindow(false);
@@ -1258,7 +1281,7 @@ void CityWindow::drawArea( Device &dev, AreaID index, int x, int y )
 	assertValidID(index);
 
 	const CityArea &area = m_theCity.areas[index];
-	if( area.bits.test(CityArea::dependent) && !area.bits.test(CityArea::master) )
+	if( area.isSlave() )
 		return;
 
 	CityArea::AreaType type = area.areaType;
@@ -1333,10 +1356,16 @@ void CityWindow::drawArea( Device &dev, AreaID index, int x, int y )
 		else if( !area.bits.test(CityArea::dependent) )
 			dev.drawIcon( x, y, AREA_PIXEL_SIZE, AREA_PIXEL_SIZE, *drawIcon );
 	}
-	if( area.bits.test( CityArea::tree) )
+	if( area.bits.test(CityArea::tree) )
 		hasDot = true;
 	else if( hasDot )
 		hasDot = !randomNumber(WATER_RANDOM);
+
+	if( area.bits.test(CityArea::inQueue) )
+	{
+		hasDot = true;
+		dotColor = colors::AQUA_MARINE;
+	}
 	if(hasDot)
 	{
 		// paint a dot
@@ -1481,11 +1510,12 @@ void CityWindow::changeAreaType( AreaID index )
 				if( master != nullptr )
 					createLargeArea( master, masterIndex );
 			}
-			else
+			else if( area.isPrivateBuildingArea() )
 			{
+				area.bits.set( CityArea::inQueue );
 				m_areaQueue.push( index );
 			}
-			updateStatus();
+			updateStatusDisplay();
 		}
 		else if(CityArea::atTRAMWAY == area.areaType )
 		{
@@ -1496,7 +1526,7 @@ void CityWindow::changeAreaType( AreaID index )
 				const AreaInfo &areaInfo = s_areaInfos[CityArea::atCROSSING];
 				m_theCity.money -= areaInfo.price;
 				area.areaType = CityArea::atCROSSING;
-				updateStatus();
+				updateStatusDisplay();
 			}
 		}
 		else if(CityArea::atSTREET == area.areaType )
@@ -1508,7 +1538,7 @@ void CityWindow::changeAreaType( AreaID index )
 				const AreaInfo &areaInfo = s_areaInfos[CityArea::atCROSSING];
 				m_theCity.money -= areaInfo.price;
 				area.areaType = CityArea::atCROSSING;
-				updateStatus();
+				updateStatusDisplay();
 			}
 		}
 	}
@@ -1653,9 +1683,14 @@ ProcessStatus CityWindow::handleCreate()
 	m_successCount.create( &m_tools, INFO_X, y, 0, 0 );
 	y += m_successLabel.getSize().height+PADDING;
 
+	m_queueLabel.setText("Warteschlange");
+	m_queueLabel.create( &m_tools, PADDING, y, 0, 0 );
+	m_queueCount.create( &m_tools, INFO_X, y, 0, 0 );
+	y += m_queueLabel.getSize().height+PADDING;
+
 	m_tools.resize( COMBO_WIDTH, y );
 	m_tools.adjustWindoRect();
-	updateStatus();
+	updateStatusDisplay();
 
 	setTimer(1000);
 
